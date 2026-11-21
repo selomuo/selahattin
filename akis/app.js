@@ -2,29 +2,26 @@
 
 /* ================= Veri ================= */
 
-const KEY = 'akis.v1';
-const blank = () => ({ profile: { name: '', theme: 'system' }, accounts: [], items: [] });
+const blank = () => ({ profile: { name: '', theme: 'system' }, accounts: [], items: [], notices: [] });
 
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return blank();
-    const d = JSON.parse(raw);
-    return Object.assign(blank(), d, { profile: Object.assign(blank().profile, d.profile || {}) });
-  } catch (e) {
-    return blank();
-  }
+function normalize(d) {
+  const out = Object.assign(blank(), d || {});
+  out.profile = Object.assign(blank().profile, (d && d.profile) || {});
+  // Önceki sürümden gelen kayıtlar: geçmiş tarihleri otomatik onaylamamak için bugünden başlat
+  for (const it of out.items) if (!it.createdAt) it.createdAt = todayStr();
+  return out;
 }
 
-let db = load();
+let db = blank();
 
 function save() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(db));
-  } catch (e) {
-    toast('Kaydedilemedi: tarayıcı depolaması kapalı olabilir');
-  }
+  if (!Store.user) return;
+  if (Store.save(db) === false) toast('Kaydedilemedi: tarayıcı depolaması kapalı olabilir');
 }
+
+window.addEventListener('online', () => { if (Store.user && Store.pending) Store.flush(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && Store.user) Store.flush(); });
+window.addEventListener('pagehide', () => { if (Store.user) Store.flush(); });
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -73,10 +70,27 @@ function parseAmount(s) {
 
 // Tutar kutusu yazılan rakam kadar genişlesin, ₺ işareti rakamın yanında dursun
 document.addEventListener('input', (e) => { if (e.target.matches('.amount-in input')) fitAmount(e.target); });
+// Yazının gerçek genişliği gizli bir kopyayla ölçülür (telefon fontları farklı olduğu için tahmin edilmez).
+// Kutuya sığmıyorsa yazı küçülür; hiçbir zaman rakamın bir kısmı gizlenmez.
 function fitAmount(el) {
-  const v = el.value || el.placeholder;
-  const narrow = (v.match(/[.,\-−]/g) || []).length;
-  el.style.width = `${Math.max(1, v.length - narrow * 0.6) + 0.2}ch`;
+  const box = el.parentElement;
+  const avail = Math.max(60, (box.parentElement || box).clientWidth - 70);
+  const m = fitAmount.m || (fitAmount.m = Object.assign(document.createElement('span'), { className: 'measure' }));
+  if (!m.isConnected) document.body.appendChild(m);
+  el.style.fontSize = '';
+  const cs = getComputedStyle(el);
+  let size = parseFloat(cs.fontSize);
+  m.style.font = cs.font;
+  m.style.letterSpacing = cs.letterSpacing;
+  m.textContent = el.value || el.placeholder || '0';
+  let w = m.getBoundingClientRect().width;
+  if (w > avail) {
+    size = Math.max(16, Math.floor(size * avail / w));
+    el.style.fontSize = size + 'px';
+    m.style.fontSize = size + 'px';
+    w = m.getBoundingClientRect().width;
+  }
+  el.style.width = Math.ceil(w + size * 0.15) + 'px';
 }
 
 function toast(msg) {
@@ -187,6 +201,68 @@ function nextDate(it) {
 
 const isActive = (it) => it.unit !== 'once' && !!nextDate(it);
 
+/* ================= Onay: geldi mi / ödendi mi? =================
+   Günü gelen kayıt ana sayfada "Geldi mi? Evet / Hayır" diye sorulur.
+   Cevap verilmezse ertesi gün otomatik onaylanır ve bağlı hesabın bakiyesi güncellenir.
+   "Hayır" denirse otomatik onaylanmaz, ertesi gün yeniden sorulur. */
+
+const accOf = (it) => db.accounts.find((a) => a.id === it.account);
+const tracked = (e) => e.date >= (e.it.createdAt || '0000-00-00');
+
+function setDone(it, date, val) {
+  it.done = it.done || {};
+  const was = !!it.done[date];
+  const acc = accOf(it);
+  const amt = amountOn(it, date) * (it.kind === 'income' ? 1 : -1);
+  if (val && !was && acc) acc.balance = round2(acc.balance + amt);
+  if (!val && was && acc) acc.balance = round2(acc.balance - amt);
+  if (val) it.done[date] = val; else delete it.done[date];
+  if (val && it.no) delete it.no[date];
+}
+
+function dueQuestions() {
+  const t = todayStr();
+  return events(addDays(t, -60), t).filter((e) => !e.done && tracked(e) && !(e.it.no && e.it.no[e.date] === t));
+}
+
+function autoConfirm() {
+  const t = todayStr();
+  const list = events(addDays(t, -60), addDays(t, -1)).filter((e) => !e.done && tracked(e) && !(e.it.no && e.it.no[e.date]));
+  if (!list.length) return;
+  for (const e of list) {
+    setDone(e.it, e.date, 'auto');
+    db.notices.push({ id: e.it.id, date: e.date });
+  }
+  save();
+}
+
+function answer(id, date, yes) {
+  const it = db.items.find((x) => x.id === id);
+  if (!it) return;
+  const inc = it.kind === 'income';
+  if (yes) {
+    setDone(it, date, true);
+    const acc = accOf(it);
+    toast(acc ? `${inc ? 'Geldi' : 'Ödendi'} · ${acc.name || bankById[acc.bank]?.name} güncellendi` : inc ? 'Geldi 🎉' : 'Ödendi ✓');
+  } else {
+    it.no = it.no || {};
+    it.no[date] = todayStr();
+    toast('Tamam, yarın yeniden soracağım');
+  }
+  save(); render();
+}
+
+function undoAuto(id, date) {
+  const it = db.items.find((x) => x.id === id);
+  db.notices = db.notices.filter((n) => !(n.id === id && n.date === date));
+  if (it) {
+    setDone(it, date, false);
+    it.no = it.no || {};
+    it.no[date] = 'geri';
+  }
+  save(); render(); toast('Geri alındı');
+}
+
 /* ================= Durum ve gezinme ================= */
 
 const ui = {
@@ -271,6 +347,33 @@ function greeting() {
   return 'İyi geceler';
 }
 
+const QUESTION = {
+  dizi: 'ödemesi çekildi mi?', muzik: 'ödemesi çekildi mi?', sosyal: 'ödemesi çekildi mi?', oyun: 'ödemesi çekildi mi?',
+  bulut: 'ödemesi çekildi mi?', hat: 'faturasını ödedin mi?', internet: 'faturasını ödedin mi?', fatura: 'ödendi mi?',
+  konut: 'ödendi mi?', finans: 'ödendi mi?', harcama: 'yapıldı mı?',
+};
+
+function questionCard(e) {
+  const inc = e.it.kind === 'income';
+  const acc = accOf(e.it);
+  const q = inc ? 'yattı mı?' : QUESTION[e.it.cat] || 'ödendi mi?';
+  const late = e.date < todayStr();
+  return `<div class="row question">
+    <button class="q-top" data-occ="${e.it.id}|${e.date}">
+      ${iconHTML(e.it)}
+      <span class="row-main">
+        <span class="row-title"><span class="ellipsis">${esc(e.it.name)} ${q}</span></span>
+        <span class="row-sub">${late ? `<span class="badge late">${inc ? 'GELMEDİ' : 'GECİKTİ'}</span> ` : ''}${fmtDate(e.date)}${acc ? ' · ' + esc(acc.name || bankById[acc.bank]?.name) : ''}</span>
+      </span>
+      <span class="row-amt ${inc ? 'inc' : ''}"><b>${inc ? '+' : '−'}${money(e.amount)}</b></span>
+    </button>
+    <div class="q-btns">
+      <button class="btn ghost" data-ans="${e.it.id}|${e.date}|0">Hayır</button>
+      <button class="btn primary" data-ans="${e.it.id}|${e.date}|1">Evet</button>
+    </div>
+  </div>`;
+}
+
 function homeView() {
   const t = todayStr();
   const now = new Date();
@@ -282,17 +385,22 @@ function homeView() {
   const total = accountsTotal();
   const projected = total + pendingNet;
 
-  const upcoming = events(addDays(t, -30), addDays(t, 45)).filter((e) => !e.done);
-  const overdue = upcoming.filter((e) => e.date < t);
-  const next = upcoming.filter((e) => e.date >= t).slice(0, 8);
+  const questions = dueQuestions();
+  const qKeys = new Set(questions.map((e) => e.it.id + e.date));
+  const next = events(t, addDays(t, 45)).filter((e) => !e.done && !qKeys.has(e.it.id + e.date) && e.date > t).slice(0, 8);
+  const notices = db.notices.map((n) => {
+    const it = db.items.find((x) => x.id === n.id);
+    return it && it.done && it.done[n.date] ? { it, date: n.date, amount: amountOn(it, n.date) } : null;
+  }).filter(Boolean);
 
   const subs = db.items.filter((it) => it.kind === 'expense' && isActive(it));
   const stack = subs.slice(0, 3).map((it) => iconHTML(it, 'xs')).join('');
-  const name = db.profile.name ? esc(db.profile.name) : 'Hoş geldin';
+  const display = db.profile.name || (Store.user && Store.user.name) || '';
+  const name = display ? esc(display) : 'Hoş geldin';
 
   return `
   <header class="top">
-    <button class="avatar" data-act="settings" aria-label="Ayarlar">${esc((db.profile.name || 'A')[0].toUpperCase())}</button>
+    <button class="avatar" data-act="settings" aria-label="Ayarlar">${esc((display || 'A')[0].toLocaleUpperCase('tr'))}</button>
     <div class="hello"><small>${greeting()} 👋</small><b>${name}</b></div>
     <button class="icon-btn" data-act="settings" aria-label="Ayarlar">${svg('dots')}</button>
   </header>
@@ -309,6 +417,20 @@ function homeView() {
     </div>
   </section>
 
+  ${notices.length ? `
+  <section class="card notice">
+    <div class="notice-head"><span class="ico soft sm" style="--c:#16A34A">${svg('check')}</span>
+      <div><b>Otomatik onaylandı</b><small>Cevap vermediğin için ertesi gün işaretlendi</small></div>
+      <button class="link" data-act="notices-ok">Tamam</button></div>
+    ${notices.map((n) => `<div class="notice-row">${iconHTML(n.it, 'xs')}<span class="ellipsis">${esc(n.it.name)} · ${fmtDateShort(n.date)}</span>
+      <b class="${n.it.kind === 'income' ? 'inc' : ''}">${n.it.kind === 'income' ? '+' : '−'}${money0(n.amount)}</b>
+      <button class="link" data-undo="${n.it.id}|${n.date}">Geri al</button></div>`).join('')}
+  </section>` : ''}
+
+  ${questions.length ? `
+  <div class="sec-head"><h2>Kontrol et</h2><span class="muted">${questions.length} kayıt</span></div>
+  <section class="list">${questions.map(questionCard).join('')}</section>` : ''}
+
   <section class="mini-stats">
     <div class="card mini"><small>${MONTHS[now.getMonth()]} geliri</small><b class="inc">+${money0(inc)}</b></div>
     <div class="card mini"><small>${MONTHS[now.getMonth()]} gideri</small><b>−${money0(exp)}</b></div>
@@ -320,10 +442,6 @@ function homeView() {
     <button class="action" data-go="stats"><span class="a-ico" style="--c:#F59E0B">${svg('chart')}</span>Özet</button>
     <button class="action" data-act="ics"><span class="a-ico" style="--c:#0EA5E9">${svg('bell')}</span>Hatırlat</button>
   </section>
-
-  ${overdue.length ? `
-  <div class="sec-head"><h2>Bekleyenler</h2><span class="muted">${overdue.length} kayıt</span></div>
-  <section class="list">${overdue.map((e) => eventRow(e)).join('')}</section>` : ''}
 
   <div class="sec-head"><h2>Yaklaşanlar</h2>${db.items.length ? '<button class="pill" data-go="calendar">Takvim ' + svg('chev', 'chev') + '</button>' : ''}</div>
   ${next.length ? `<section class="list">${next.map((e) => eventRow(e)).join('')}</section>`
@@ -592,7 +710,7 @@ function servicePicker(catId) {
 
 function itemForm(base, back) {
   const editing = !!base.id;
-  const it = editing ? base : Object.assign({ kind: catById[base.cat].kind, amount: '', start: todayStr(), unit: 'month', n: 1, count: null, account: '', note: '' }, base);
+  const it = editing ? base : Object.assign({ kind: catById[base.cat].kind, amount: '', start: todayStr(), unit: 'month', n: 1, count: null, account: db.accounts.length ? db.accounts[0].id : '', note: '' }, base);
   const inc = it.kind === 'income';
   const rep = repeatOf(it).id;
   const accOpts = db.accounts.map((a) => `<option value="${a.id}" ${a.id === it.account ? 'selected' : ''}>${esc(a.name || bankById[a.bank]?.name)}</option>`).join('');
@@ -643,7 +761,7 @@ function itemForm(base, back) {
         unit: r.unit, n: r.n, count: r.unit !== 'once' && count > 0 ? count : null,
         account: form.account.value, note: form.note.value.trim(),
       });
-      if (!editing) { out.id = uid(); out.done = {}; db.items.push(out); }
+      if (!editing) { out.id = uid(); out.done = {}; out.createdAt = todayStr(); db.items.push(out); }
       save(); closeSheet(); render();
       toast(editing ? 'Kaydedildi' : `${out.name} eklendi`);
     };
@@ -702,15 +820,9 @@ function occSheet(id, date) {
       save(); render(); toast('Bu seferki tutar güncellendi');
     };
     $('[data-toggle]', body).onclick = () => {
-      it.done = it.done || {};
-      const cur = amountOn(it, date);
-      if (done) {
-        delete it.done[date];
-        if (acc) acc.balance = round2(acc.balance - (inc ? cur : -cur));
-      } else {
-        it.done[date] = true;
-        if (acc) acc.balance = round2(acc.balance + (inc ? cur : -cur));
-      }
+      setDone(it, date, !done);
+      if (done && date < todayStr()) { it.no = it.no || {}; it.no[date] = 'geri'; }
+      db.notices = db.notices.filter((n) => !(n.id === it.id && n.date === date));
       save(); closeSheet(); render();
       toast(done ? 'İşaret kaldırıldı' : inc ? 'Geldi 🎉' : 'Ödendi ✓');
     };
@@ -771,6 +883,9 @@ function accountForm(base, back) {
 function settings() {
   const p = db.profile;
   openSheet(`${sheetHead('Ayarlar')}
+    <div class="user-card"><span class="avatar sm">${esc(Store.user.name[0].toLocaleUpperCase('tr'))}</span>
+      <span><b>@${esc(Store.user.name)}</b><small>${Store.mode === 'cloud' ? 'Bulut hesabı · her cihazdan giriş' : 'Bu cihazdaki hesap'}</small></span>
+      <button class="btn ghost" data-act="logout">Çıkış</button></div>
     <form class="form" onsubmit="return false">
       <div class="field"><span>Adın</span><input name="name" value="${esc(p.name)}" placeholder="Adın" maxlength="24"></div>
       <div class="field col"><span>Görünüm</span>
@@ -780,9 +895,11 @@ function settings() {
       <button data-act="ics">${svg('bell')}<span><b>iPhone takvimine aktar</b><small>Her ödeme ve gelir için hatırlatma kurulur</small></span></button>
       <button data-act="export">${svg('receipt')}<span><b>Yedek indir</b><small>Tüm verini dosya olarak kaydet</small></span></button>
       <label>${svg('cloud')}<span><b>Yedekten geri yükle</b><small>Daha önce indirdiğin dosyayı seç</small></span><input type="file" accept="application/json,.json" hidden data-import></label>
-      <button data-act="reset" class="red">${svg('x')}<span><b>Tüm verileri sil</b><small>Bu cihazdaki her şey silinir</small></span></button>
+      <button data-act="reset" class="red">${svg('x')}<span><b>Bu hesabın verilerini sil</b><small>Hesapların ve kayıtların silinir</small></span></button>
     </div>
-    <p class="muted small center">Verilerin yalnızca bu cihazda, tarayıcının içinde saklanır; hiçbir sunucuya gönderilmez.</p>`, (body) => {
+    <p class="muted small center">${Store.mode === 'cloud'
+      ? 'Verilerin kendi hesabında saklanır; başka kullanıcılar göremez.'
+      : 'Verilerin yalnızca bu cihazda saklanır; hiçbir sunucuya gönderilmez. Bu cihazdaki diğer hesaplar senin verini göremez.'}</p>`, (body) => {
     wireHead(body);
     const name = $('[name=name]', body);
     name.oninput = () => { p.name = name.value.trim(); save(); };
@@ -818,7 +935,7 @@ function importBackup(file) {
       const d = JSON.parse(r.result);
       if (!Array.isArray(d.items) || !Array.isArray(d.accounts)) throw new Error('bad');
       if (!confirm('Mevcut verilerin yedekteki verilerle değiştirilsin mi?')) return;
-      db = Object.assign(blank(), d);
+      db = normalize(d);
       save(); applyTheme(); closeSheet(); render(); toast('Yedek yüklendi');
     } catch (e) {
       toast('Bu dosya bir Akış yedeği değil');
@@ -831,14 +948,18 @@ function importBackup(file) {
 
 function icsText(s) { return String(s).replace(/\\/g, '\\\\').replace(/[,;]/g, (c) => '\\' + c).replace(/\n/g, '\\n'); }
 
-function buildICS() {
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Akis//TR', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Akış – Ödemeler'];
+// Takvime aktarılabilecek kayıtlar: bugünden sonra en az bir tarihi olanlar
+function icsCandidates() {
   const t = todayStr();
+  return db.items.map((it) => ({ it, first: occurrences(it, addDays(t, -1), addDays(t, 800))[0] })).filter((x) => x.first);
+}
+
+function buildICS(ids) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Akis//TR', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Akış'];
   let n = 0;
-  for (const it of db.items) {
-    const [first] = occurrences(it, addDays(t, -1), addDays(t, 800));
-    if (!first) continue;
+  for (const { it, first } of icsCandidates()) {
+    if (ids && !ids.has(it.id)) continue;
     const inc = it.kind === 'income';
     const dt = first.replace(/-/g, '');
     const nextDay = addDays(first, 1).replace(/-/g, '');
@@ -871,33 +992,89 @@ function buildICS() {
   return { text: lines.join('\r\n'), n };
 }
 
+// Takvime aktarma: kayıtları tek tek ya da toplu seçip yalnızca seçilenleri ekler
 function exportICS() {
-  const { text, n } = buildICS();
-  if (!n) { toast('Önce bir kayıt ekle'); return; }
-  openSheet(`${sheetHead('Hatırlatmalar')}
-    <div class="occ">
-      <span class="ico soft xl" style="--c:#0EA5E9">${svg('bell')}</span>
-      <h2>iPhone takvimine aktar</h2>
-      <p class="muted">${n} kaydın tekrarlarıyla birlikte takvimine eklenir. Her biri için <b>bir gün önce 09:00</b>'da ve <b>o gün 09:00</b>'da bildirim gelir.</p>
-      <button class="btn primary block" data-dl>Takvim dosyasını indir</button>
+  const list = icsCandidates();
+  if (!list.length) { toast('Önce bir kayıt ekle'); return; }
+  const off = new Set(db.profile.icsOff || []);
+  const sel = new Set(list.filter((x) => !off.has(x.it.id)).map((x) => x.it.id));
+
+  const rowsHTML = (kind) => list.filter((x) => x.it.kind === kind).map(({ it, first }) => `
+    <button class="pick ${sel.has(it.id) ? 'on' : ''}" data-pick="${it.id}">
+      <span class="tick">${svg('check')}</span>
+      ${iconHTML(it, 'sm')}
+      <span class="row-main"><span class="row-title"><span class="ellipsis">${esc(it.name)}</span></span>
+        <span class="row-sub">${esc(repeatLabel(it))} · ${fmtDateShort(first)}</span></span>
+      <b class="${kind === 'income' ? 'inc' : ''}">${kind === 'income' ? '+' : ''}${money0(it.amount)}</b>
+    </button>`).join('');
+  const has = (k) => list.some((x) => x.it.kind === k);
+  const group = (k, title) => (has(k) ? `<div class="pick-head"><h3>${title}</h3><button class="link" data-pick-all="${k}">Hepsini seç</button></div>
+    <div class="pick-list">${rowsHTML(k)}</div>` : '');
+
+  openSheet(`<div class="sh-head">
+      <button class="icon-btn" data-close aria-label="Kapat">${svg('x')}</button>
+      <h2>Takvime aktar</h2>
+      <button class="sel-all" data-sel-all aria-label="Tümünü seç">${svg('check')}</button></div>
+    <p class="muted small center" style="margin:-6px 0 12px">Takvimine eklemek istediklerini işaretle. Her biri için bir gün önce ve o gün 09:00'da bildirim gelir.</p>
+    ${group('expense', 'Giderler')}
+    ${group('income', 'Gelirler')}
+    <div class="sticky-cta"><button class="btn primary block" data-dl></button></div>
+    <details class="howto">
+      <summary>Eklediklerimi nasıl silerim / değiştiririm?</summary>
       <ol class="steps">
-        <li>Dosya inince <b>“Tümünü ekle”</b>ye dokun.</li>
-        <li>Yeni kayıt ekledikten sonra bu adımı tekrarlarsan aynı kayıtlar güncellenir.</li>
+        <li>İlk eklemeden önce iPhone'da <b>Takvim → Takvimler → Takvim Ekle</b> ile <b>“Akış”</b> adında ayrı bir takvim oluştur.</li>
+        <li>Dosyayı açıp eklerken takvim olarak <b>Akış</b>'ı seç.</li>
+        <li>Seçimini değiştirmek istediğinde <b>Takvim → Takvimler → Akış ⓘ → Takvimi Sil</b> de; hepsi tek seferde silinir. Sonra burada yeni seçimini yapıp yeniden ekle.</li>
         <li>Ana ekrandaki uygulamada indirme açılmazsa bu sayfayı Safari'de açıp dene.</li>
       </ol>
-    </div>`, (body) => {
+    </details>`, (body) => {
     wireHead(body);
-    $('[data-dl]', body).onclick = () => download('akis-odemeler.ics', text, 'text/calendar');
+    const refresh = () => {
+      $$('[data-pick]', body).forEach((b) => b.classList.toggle('on', sel.has(b.dataset.pick)));
+      const all = sel.size === list.length;
+      $('[data-sel-all]', body).classList.toggle('on', all);
+      $$('[data-pick-all]', body).forEach((b) => {
+        const ids = list.filter((x) => x.it.kind === b.dataset.pickAll).map((x) => x.it.id);
+        b.textContent = ids.every((id) => sel.has(id)) ? 'Hiçbirini seçme' : 'Hepsini seç';
+      });
+      const btn = $('[data-dl]', body);
+      btn.textContent = sel.size ? `Seçilen ${sel.size} kaydı takvime ekle` : 'Kayıt seç';
+      btn.disabled = !sel.size;
+      db.profile.icsOff = list.filter((x) => !sel.has(x.it.id)).map((x) => x.it.id);
+      save();
+    };
+    $$('[data-pick]', body).forEach((b) => (b.onclick = () => {
+      const id = b.dataset.pick;
+      if (sel.has(id)) sel.delete(id); else sel.add(id);
+      refresh();
+    }));
+    $$('[data-pick-all]', body).forEach((b) => (b.onclick = () => {
+      const ids = list.filter((x) => x.it.kind === b.dataset.pickAll).map((x) => x.it.id);
+      const allOn = ids.every((id) => sel.has(id));
+      ids.forEach((id) => (allOn ? sel.delete(id) : sel.add(id)));
+      refresh();
+    }));
+    $('[data-sel-all]', body).onclick = () => {
+      if (sel.size === list.length) sel.clear(); else list.forEach((x) => sel.add(x.it.id));
+      refresh();
+    };
+    $('[data-dl]', body).onclick = () => {
+      const { text } = buildICS(sel);
+      download('akis.ics', text, 'text/calendar');
+    };
+    refresh();
   });
 }
 
 /* ================= Olaylar ================= */
 
 document.addEventListener('click', (ev) => {
-  const el = ev.target.closest('[data-go],[data-act],[data-occ],[data-day],[data-cal],[data-stat],[data-acc],[data-edit]');
+  const el = ev.target.closest('[data-go],[data-act],[data-occ],[data-day],[data-cal],[data-stat],[data-acc],[data-edit],[data-ans],[data-undo]');
   if (!el) return;
   const d = el.dataset;
   if (d.go) return go(d.go);
+  if (d.ans) { const [id, date, yes] = d.ans.split('|'); return answer(id, date, yes === '1'); }
+  if (d.undo) { const [id, date] = d.undo.split('|'); return undoAuto(id, date); }
   if (d.occ) { const [id, date] = d.occ.split('|'); return occSheet(id, date); }
   if (d.edit) { const it = db.items.find((x) => x.id === d.edit); return it && openSheet('', () => itemForm(it)); }
   if (d.day) { ui.calSel = d.day; return render(); }
@@ -921,8 +1098,11 @@ document.addEventListener('click', (ev) => {
     case 'settings': return settings();
     case 'ics': return exportICS();
     case 'export': return exportBackup();
+    case 'notices-ok': db.notices = []; save(); return render();
+    case 'logout': return logout();
+    case 'auth-mode': authUi.mode = d.v; authUi.error = ''; return renderAuth();
     case 'reset':
-      if (confirm('Tüm hesapların ve kayıtların silinsin mi? Bu geri alınamaz.')) {
+      if (confirm('Bu hesaptaki tüm banka hesapların ve kayıtların silinsin mi? Bu geri alınamaz.')) {
         db = blank(); save(); applyTheme(); closeSheet(); go('home'); toast('Tüm veriler silindi');
       }
       return;
@@ -934,14 +1114,117 @@ $('.tab-add').onclick = () => openSheet('', () => addFlow('expense'));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#sheet-root.open')) closeSheet(); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 
-// Gün değişince (uygulama arka planda açık kalırsa) yenile
-let lastDay_ = todayStr();
+// Uygulama yeniden öne gelince (ertesi gün açıldığında) otomatik onayları çalıştır
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && todayStr() !== lastDay_) { lastDay_ = todayStr(); render(); }
+  if (!document.hidden && Store.user) { autoConfirm(); if (!$('#sheet-root.open')) render(); }
 });
 
-applyTheme();
-render();
+/* ================= Giriş / kayıt ================= */
+
+const authUi = { mode: 'login', busy: false, error: '', username: '' };
+
+function renderAuth() {
+  document.body.classList.add('auth-mode');
+  const reg = authUi.mode === 'register';
+  $('#view').innerHTML = `<div class="auth">
+    <img src="icons/icon.svg" alt="" class="auth-logo">
+    <h1>Akış</h1>
+    <p class="muted">Gelirin, giderin ve aboneliklerin tek takvimde</p>
+    <div class="seg">
+      <button data-act="auth-mode" data-v="login" class="${!reg ? 'on' : ''}">Giriş yap</button>
+      <button data-act="auth-mode" data-v="register" class="${reg ? 'on' : ''}">Kayıt ol</button>
+    </div>
+    ${readJSON(LEGACY_KEY) ? '<p class="auth-info">Bu cihazda daha önce girdiğin kayıtlar, oluşturacağın ilk hesaba aktarılacak.</p>' : ''}
+    <form class="form" id="auth-form">
+      <div class="field"><span>Kullanıcı adı</span><input name="username" value="${esc(authUi.username)}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></div>
+      <div class="field"><span>Şifre</span><input type="password" name="password" autocomplete="${reg ? 'new-password' : 'current-password'}" required></div>
+      ${reg ? '<div class="field"><span>Şifre (tekrar)</span><input type="password" name="password2" autocomplete="new-password" required></div>' : ''}
+      ${reg ? '<p class="muted small">Kullanıcı adında Türkçe karakter ve boşluk kullanma (ör. selahattin.k). Şifre en az 6 karakter.</p>' : ''}
+      ${authUi.error ? `<p class="auth-err" role="alert">${esc(authUi.error)}</p>` : ''}
+      <button class="btn primary block" ${authUi.busy ? 'disabled' : ''}>${authUi.busy ? 'Bekle…' : reg ? 'Hesap oluştur' : 'Giriş yap'}</button>
+    </form>
+    <p class="muted small center">${Store.mode === 'cloud'
+      ? 'Hesabınla her cihazdan giriş yapabilirsin. Herkes yalnızca kendi verisini görür.'
+      : 'Hesaplar bu cihazda saklanır. Aynı cihazı kullanan herkes yalnızca kendi verisini görür.'}</p>
+  </div>`;
+  $('#auth-form').onsubmit = (e) => { e.preventDefault(); doAuth(e.target); };
+}
+
+async function doAuth(form) {
+  if (authUi.busy) return;
+  const username = form.username.value;
+  const password = form.password.value;
+  authUi.username = username;
+  if (authUi.mode === 'register' && password !== form.password2.value) {
+    authUi.error = 'Şifreler aynı değil.';
+    return renderAuth();
+  }
+  authUi.busy = true;
+  authUi.error = '';
+  renderAuth();
+  try {
+    if (authUi.mode === 'register') await Store.register(username, password);
+    else await Store.login(username, password);
+    authUi.busy = false;
+    authUi.username = '';
+    await enterApp();
+  } catch (e) {
+    authUi.busy = false;
+    authUi.error = e instanceof AuthError ? e.message : 'Bir hata oluştu, tekrar dene.';
+    renderAuth();
+  }
+}
+
+async function enterApp() {
+  let loaded;
+  try {
+    loaded = await Store.loadState();
+  } catch (e) {
+    return renderFatal('Verilerin yüklenemedi. İnternet bağlantını kontrol edip tekrar dene.');
+  }
+  db = normalize(loaded);
+  save();
+  autoConfirm();
+  document.body.classList.remove('auth-mode');
+  applyTheme();
+  ui.tab = 'home';
+  go('home');
+}
+
+async function logout() {
+  if (!confirm('Çıkış yapılsın mı?')) return;
+  closeSheet();
+  await Store.logout();
+  db = blank();
+  applyTheme();
+  authUi.mode = 'login';
+  renderAuth();
+}
+
+function renderFatal(msg) {
+  document.body.classList.add('auth-mode');
+  $('#view').innerHTML = `<div class="auth"><img src="icons/icon.svg" alt="" class="auth-logo">
+    <p>${esc(msg)}</p><button class="btn primary" onclick="location.reload()">Tekrar dene</button></div>`;
+}
+
+async function boot() {
+  applyTheme();
+  let user;
+  try {
+    user = await Store.init(window.AKIS_FIREBASE);
+  } catch (e) {
+    return renderFatal('Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.');
+  }
+  if (user) return enterApp();
+  // Önceki sürümde kayıt girilmişse kullanıcıyı kayıt ekranına yönlendir; veriler ilk hesaba taşınır
+  if (readJSON(LEGACY_KEY) && !Object.keys(LocalBackend.accounts()).length) {
+    authUi.mode = 'register';
+    authUi.error = '';
+  }
+  renderAuth();
+}
+
+boot();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

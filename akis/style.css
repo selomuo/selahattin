@@ -353,7 +353,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -.01em; }
 .amount-box { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px; border-radius: 20px; background: var(--card-solid); border: 1px solid var(--line); }
 .amount-box > span { font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--muted); text-transform: uppercase; }
 .amount-in { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
-.amount-in input { width: 2ch; min-width: 1.6ch; max-width: 100%; text-align: center; font-size: 38px; font-weight: 800; letter-spacing: -.03em; border: 0; outline: 0; background: none; }
+.amount-in input { width: 2ch; min-width: 0; max-width: 100%; padding: 0; margin: 0; text-align: center; font-size: 38px; font-weight: 800; letter-spacing: -.03em; border: 0; outline: 0; background: none; }
 .amount-in b { font-size: 26px; color: var(--muted); }
 .amount-in.sm input { font-size: 18px; font-weight: 700; text-align: right; }
 .amount-in.sm b { font-size: 16px; }
@@ -409,3 +409,60 @@ h1, h2, h3 { margin: 0; letter-spacing: -.01em; }
 @media (min-width: 560px) {
   .sheet { bottom: 24px; border-radius: 28px; }
 }
+
+/* ===== Geldi mi? kartları ===== */
+.row.question { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 14px; }
+.q-top { display: flex; align-items: center; gap: 12px; text-align: left; width: 100%; }
+.q-top .row-sub { display: flex; align-items: center; gap: 6px; }
+.q-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.q-btns .btn { padding: 10px; font-size: 15px; border-radius: 13px; }
+
+.notice { padding: 12px 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
+.notice-head { display: flex; align-items: center; gap: 10px; }
+.notice-head > div { flex: 1; display: flex; flex-direction: column; }
+.notice-head small { color: var(--muted); font-size: 12px; }
+.notice-row { display: flex; align-items: center; gap: 8px; font-size: 14px; padding-top: 8px; border-top: 1px solid var(--line); }
+.notice-row .ellipsis { flex: 1; }
+.link { color: var(--primary); font-weight: 650; font-size: 14px; padding: 6px 4px; }
+
+/* ===== Takvime aktar seçimi ===== */
+.sel-all, .tick {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  border: 2px solid color-mix(in srgb, var(--muted) 55%, transparent); color: transparent; transition: background .15s, border-color .15s;
+}
+.sel-all { width: 38px; height: 38px; }
+.tick { width: 26px; height: 26px; }
+.sel-all svg, .tick svg { width: 16px; height: 16px; stroke-width: 3; }
+.sel-all.on, .pick.on .tick { background: var(--primary); border-color: var(--primary); color: #fff; }
+.pick-head { display: flex; justify-content: space-between; align-items: center; margin: 10px 2px 8px; }
+.pick-head h3 { font-size: 15px; }
+.pick-list { background: var(--card-solid); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.pick { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 14px; text-align: left; }
+.pick + .pick { border-top: 1px solid var(--line); }
+.pick b { font-size: 14px; flex: none; }
+.pick:not(.on) .ico { opacity: .45; }
+.sticky-cta { position: sticky; bottom: 0; padding: 14px 0 6px; background: linear-gradient(transparent, var(--bg2) 30%); margin-top: 4px; }
+.btn:disabled { opacity: .5; box-shadow: none; }
+.howto { margin-top: 8px; background: var(--card-solid); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
+.howto summary { font-weight: 600; cursor: pointer; color: var(--primary); }
+.howto .steps { margin-top: 10px; }
+
+/* ===== Hesap / giriş ===== */
+.user-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: 18px; }
+.user-card > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.user-card small { color: var(--muted); font-size: 12.5px; }
+.user-card .btn { padding: 8px 14px; font-size: 14px; }
+.avatar.sm { width: 40px; height: 40px; font-size: 16px; box-shadow: none; }
+body.auth-mode .tabbar { display: none; }
+.auth { max-width: 380px; margin: 0 auto; padding-top: 6vh; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.auth h1 { font-size: 32px; font-weight: 800; }
+.auth > p { margin: 0; }
+.auth .seg, .auth .form { width: 100%; }
+.auth .form { text-align: left; }
+.auth .field input { text-align: right; }
+.auth-logo { width: 84px; height: 84px; border-radius: 24px; box-shadow: var(--shadow-p); }
+.auth-err { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--late-bg); color: var(--late-fg); font-weight: 600; font-size: 14px; }
+.auth-info { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--primary-soft); color: var(--primary); font-weight: 600; font-size: 13.5px; }
+
+/* Tutar ölçümü için görünmez kopya */
+.measure { position: absolute; left: -9999px; top: 0; visibility: hidden; white-space: pre; }

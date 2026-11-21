@@ -7,8 +7,11 @@ normal bir uygulama gibi tam ekran açılır, internetsiz de çalışır.
 ## Özellikler
 
 - **Ana sayfa:** toplam varlık, ay sonu tahmini (bakiyeler + bu ay gelecekler − gidecekler),
-  bu ayın geliri/gideri, **Bekleyenler** (tarihi geçmiş ama “geldi/ödendi” işaretlenmemiş
-  kayıtlar) ve **Yaklaşanlar** (BUGÜN / YARIN / 3 GÜN etiketleriyle)
+  bu ayın geliri/gideri ve **Yaklaşanlar** (BUGÜN / YARIN / 3 GÜN etiketleriyle)
+- **Kontrol et:** günü gelen her kayıt “Bursun yattı mı?”, “Turkcell faturasını ödedin mi?”
+  diye sorulur. **Evet** deyince bağlı hesabın bakiyesi hemen güncellenir. Cevap verilmezse
+  **ertesi gün otomatik onaylanır**, ana sayfada “Otomatik onaylandı” kartıyla gösterilir ve
+  **Geri al** ile geri alınabilir. **Hayır** denirse otomatik onaylanmaz, ertesi gün yeniden sorulur
 - **Takvim:** günlerin altında renkli noktalar (gelir yeşil, gider turuncu, tamamlanan mor);
   bir güne dokununca o günden itibaren ayın kayıtları zaman çizelgesinde
 - **Hazır kalemler:** yaklaşık 120 hizmet logolarıyla: Netflix, YouTube, Spotify, Disney+,
@@ -19,16 +22,33 @@ normal bir uygulama gibi tam ekran açılır, internetsiz de çalışır.
 - **Tekrar:** tek sefer, her hafta, 2 haftada bir, her ay, 2/3/6 ayda bir, her yıl;
   “kaç kez?” alanıyla taksitli ve parça parça gelen ödemeler. Ayın 31'i gibi günler kısa
   aylarda ayın son gününe kayar
-- **Geldi / Ödendi:** işaretleyince bağlı banka hesabının bakiyesi kendiliğinden güncellenir;
-  tek bir seferin tutarı ayrıca değiştirilebilir
+- **Geldi / Ödendi:** bir kayda dokunup elle de işaretlenebilir; tek bir seferin tutarı
+  ayrıca değiştirilebilir
 - **Hesaplar:** banka kartları (Ziraat, VakıfBank, İş, Garanti, Akbank, Enpara, Papara,
   Wise, nakit, altın…); bakiyeler elle girilir
 - **Özet:** ay ay gelir, gider, birikim yüzdesi; kategori ve kalem dağılımı
-- **Hatırlatma:** tüm kayıtları iPhone Takvimi'ne aktarır (bir gün önce ve o gün 09:00'da bildirim)
+- **Takvime aktar:** istediğin kayıtları tek tek ya da “Giderler / Gelirler / Tümü” olarak
+  seçip iPhone Takvimi'ne ekler (bir gün önce ve o gün 09:00'da bildirim). Ayrı bir
+  “Akış” takvimine eklersen hepsini tek seferde silip yeniden seçebilirsin
+- **Hesaplar:** kullanıcı adı + şifre ile kayıt ve giriş; herkes yalnızca kendi verisini görür
 - Açık / koyu tema, yedek indirme ve geri yükleme
 
-Veriler yalnızca o cihazda, tarayıcının içinde saklanır; hiçbir sunucuya gönderilmez.
-Telefon değiştirirken **Ayarlar → Yedek indir** ile dosyayı alıp yeni cihazda geri yükle.
+## Hesaplar ve veriler
+
+`config.js` boşken hesaplar **yalnızca o cihazda** tutulur: aynı telefonu kullananlar
+birbirinin verisini göremez, arkadaşların kendi telefonlarında zaten ayrı veri tutar.
+Önceki sürümde girilmiş kayıtlar, cihazda açılan ilk hesaba aktarılır.
+
+Telefon değişince verinin kaybolmaması ve her cihazdan aynı hesapla girilebilmesi için
+ücretsiz bir Firebase projesi bağlanabilir (bir kerelik, ~10 dakika):
+
+1. https://console.firebase.google.com → **Proje ekle** (Tabak için açtığın projeyi de kullanabilirsin).
+2. **Build → Authentication → Sign-in method → E-posta/Şifre → Etkinleştir.**
+3. **Build → Firestore Database → Veritabanı oluştur** (production mode). **Kurallar** sekmesine
+   `firestore.rules` içeriğini yapıştır. Tabak'ın projesini kullanıyorsan mevcut kuralları
+   silme; içindeki `match /akis/{uid} { … }` bloğunu mevcut kuralların içine ekle.
+4. Proje ayarları → **Uygulamalarınız → Web (`</>`)** → gösterilen `firebaseConfig`
+   değerlerini `config.js` dosyasına yapıştır ve siteyi yeniden yükle.
 
 ## Telefona kurma
 
