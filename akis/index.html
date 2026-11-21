@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Akış</title>
+  <meta name="description" content="Gelir, gider, abonelik ve banka hesaplarını tek ekranda takip et.">
+  <meta name="theme-color" content="#eef0f8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Akış">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-blobs" aria-hidden="true"><i></i><i></i><i></i></div>
+  <main id="view" aria-live="polite"></main>
+
+  <nav class="tabbar" aria-label="Ana menü">
+    <button data-tab="home" class="active" aria-label="Ana sayfa">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg></button>
+    <button data-tab="calendar" aria-label="Takvim">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+    <button class="tab-add" aria-label="Yeni kayıt ekle">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button data-tab="stats" aria-label="Özet">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-6"/></svg></button>
+    <button data-tab="accounts" aria-label="Hesaplar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg></button>
+  </nav>
+
+  <div id="sheet-root"></div>
+  <div id="toast" role="status"></div>
+
+  <script src="catalog.js"></script>
+  <script src="logos.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
